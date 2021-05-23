@@ -1,0 +1,76 @@
+#include <ESP32Servo.h>
+
+int encoder_pin = A7; // pulse output from the module
+unsigned int new_rpm; // rpm reading
+unsigned int old_rpm;
+unsigned int rpm;
+unsigned int level;
+unsigned int def_val;
+volatile byte pulses; // number of pulses, volatile qualifier this is used so interupt can't mess with it when it's being read.
+unsigned long timeold; // for timing of pulses
+unsigned int pulsesperturn = 40;   // number of slots on encoder disk
+
+int APin = A5;
+ESP32PWM pwm;
+int freq = 1000;
+
+/* function to be triggered by a pulse counter.  The IRAM_ATTR
+ *  means the code will be run in ram meaning it's much faster - Ross
+ */
+void IRAM_ATTR counter() {
+//Update pulse count
+   pulses++;
+}
+
+void setup() {
+  // Allow allocation of all timers
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+  
+  Serial.begin(115200); // this is just to see debug output
+  pwm.attachPin(APin, freq, 10); // 1KHz 8 bit
+
+  pinMode(encoder_pin, INPUT);
+   /*Interrupt 0 is digital pin 2
+    * Triggers on Falling Edge (change from HIGH to LOW)
+   */
+  attachInterrupt(encoder_pin, counter, FALLING); // actives counter function as the pulse signal is going down on interrupt 0
+  pulses = 0; // initialize variables
+  rpm = 0;
+  new_rpm = 0;
+  old_rpm = 0;
+  level = 0;
+  def_val = 0.15;
+  timeold = millis();
+}
+
+
+void loop() {
+    if (millis() - timeold >= 1000) { 
+      detachInterrupt(encoder_pin); //Don't process interrupts during calculations, interrupt is attached at the end.
+      new_rpm = (60 * 1000 / pulsesperturn)/ (millis() - timeold)* pulses; // 60 * 1000 for minutes 
+      if(old_rpm%256 > 200 & new_rpm < 60){
+        level += 1;
+      }
+      if(old_rpm%256 < 60 & new_rpm > 200){
+        level -= 1;
+      }
+      rpm = level*256 + new_rpm;
+      old_rpm = rpm;
+      timeold = millis();
+      pulses = 0; // reset pulses
+      Serial.println(rpm,DEC); 
+      //Restart the interrupt processing
+      attachInterrupt(encoder_pin, counter, FALLING); // re-attach interrupt. 
+   }
+      
+   if (rpm > 1200){
+      def_val = 0.3;
+      pwm.writeScaled(def_val);
+   }
+   else{
+     pwm.writeScaled(def_val);
+   }
+}
